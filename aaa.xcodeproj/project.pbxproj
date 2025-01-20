@@ -244,9 +244,11 @@
 		0A14FFF92D20D8BC00674D57 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++23";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = Q9DFEBF28X;
 				ENABLE_HARDENED_RUNTIME = YES;
+				GCC_C_LANGUAGE_STANDARD = c17;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Debug;
@@ -254,9 +256,11 @@
 		0A14FFFA2D20D8BC00674D57 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "c++23";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = Q9DFEBF28X;
 				ENABLE_HARDENED_RUNTIME = YES;
+				GCC_C_LANGUAGE_STANDARD = c17;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
