@@ -5,8 +5,8 @@
 //  Created by Antony Searle on 31/12/2024.
 //
 
-#ifndef concurrent_queue_hpp
-#define concurrent_queue_hpp
+#ifndef concurrent_deque_hpp
+#define concurrent_deque_hpp
 
 #include <os/lock.h>
 #include <os/os_sync_wait_on_address.h>
@@ -20,7 +20,7 @@ namespace aaa {
     // A straightforward concurrent queue built with STL
     
     template<typename T>
-    struct ConcurrentQueue {
+    struct concurrent_deque_stl {
         
         // TODO: bad interface.  Enum?
         struct done_exception : std::exception {
@@ -35,7 +35,7 @@ namespace aaa {
         ptrdiff_t _waiting;
         bool _done;
         
-        ConcurrentQueue()
+        concurrent_deque_stl()
         : _waiting(0)
         , _done(false) {
         }
@@ -96,14 +96,14 @@ namespace aaa {
             }
         }
         
-    }; // ConcurrentQueue
+    }; // concurrent_deque_stl
     
     
     // A better-performing concurrent queue built with Apple-specific
     // os_unfair_lock and os_sync_wait_on_address
     
     template<typename T>
-    struct ConcurrentQueue2 {
+    struct concurrent_deque_apple {
                 
         // TODO: bad interface.  Enum?
         struct done_exception : std::exception {
@@ -248,7 +248,7 @@ namespace aaa {
             os_sync_wake_by_address_all(&_generation, sizeof(_generation), OS_SYNC_WAKE_BY_ADDRESS_NONE);
         }
         
-    }; // ConcurrentQueue2
+    }; // concurrent_deque_apple
     
     
     

@@ -1,12 +1,12 @@
 //
-//  work_stealing_queue.hpp
+//  work_stealing_deque.hpp
 //  aaa
 //
 //  Created by Antony Searle on 16/1/2025.
 //
 
-#ifndef work_stealing_queue_hpp
-#define work_stealing_queue_hpp
+#ifndef work_stealing_deque_hpp
+#define work_stealing_deque_hpp
 
 #include <cassert>
 
@@ -14,6 +14,8 @@
 #include <bit>
 
 #include <sanitizer/tsan_interface.h>
+
+#include "object.hpp"
 
 namespace aaa {
         
@@ -44,7 +46,7 @@ namespace aaa {
             constexpr static std::size_t CACHE_LINE_SIZE = 128;
             constexpr static std::size_t INITIAL_CAPACITY = 16;
 
-            struct circular_array {
+            struct circular_array : gc::Object {
                 
                 std::size_t _mask;
                 mutable std::atomic<T> _data[0];
@@ -52,15 +54,19 @@ namespace aaa {
                 std::size_t capacity() const { return _mask + 1; }
                 
                 explicit circular_array(std::size_t mask)
-                : _mask(mask) {
+                : gc::Object()
+                , _mask(mask) {
                     assert(std::has_single_bit(_mask + 1));
                 }
                 
                 static circular_array* make(std::size_t capacity) {
-                    void* raw = calloc(sizeof(circular_array) + sizeof(T) * capacity, 1);
+                    // void* raw = calloc(sizeof(circular_array) + sizeof(T) * capacity, 1);
+                    void* raw = operator new(sizeof(circular_array) + sizeof(T) * capacity);
                     std::size_t mask = capacity - 1;
                     return new(raw) circular_array(mask);
                 }
+                
+                virtual void _object_scan() const override {}
                 
                 std::atomic<T>& operator[](size_t i) const {
                     return _data[i & _mask];
@@ -89,51 +95,49 @@ namespace aaa {
             
             // called by owner thread
             bool pop(T& item) const {
-                ptrdiff_t bottom = this->_bottom.load(std::memory_order_relaxed);
+                std::ptrdiff_t bottom = this->_bottom.load(std::memory_order_relaxed);
                 const circular_array* array = this->_array.load(std::memory_order_relaxed);
-                ptrdiff_t new_bottom = bottom - 1;
-                _bottom.store(new_bottom, std::memory_order_relaxed);
-                // TODO: Clang produces suboptimal code on x86 for seq_cst fence
+                std::ptrdiff_t new_bottom = bottom - 1;
+                this->_bottom.store(new_bottom, std::memory_order_relaxed);
                 std::atomic_thread_fence(std::memory_order_seq_cst);
-                ptrdiff_t _cached_top = _top.load(std::memory_order_relaxed);
-                assert(_cached_top <= bottom);
-                ptrdiff_t new_top = _cached_top + 1;
-                ptrdiff_t new_size = new_bottom - _cached_top;
+                this->_cached_top = this->_top.load(std::memory_order_relaxed);
+                assert(this->_cached_top <= bottom);
+                std::ptrdiff_t new_top = this->_cached_top + 1;
+                std::ptrdiff_t new_size = new_bottom - this->_cached_top;
                 if (new_size < 0) {
-                    _bottom.store(bottom, std::memory_order_relaxed);
+                    this->_bottom.store(bottom, std::memory_order_relaxed);
                     return false;
                 }
                 item = (*array)[new_bottom].load(std::memory_order_relaxed);
                 if (new_size > 0)
                     return true;
                 assert(new_size == 0);
-                bool success = this->_top.compare_exchange_strong(_cached_top,
+                bool success = this->_top.compare_exchange_strong(this->_cached_top,
                                                                   new_top,
                                                                   std::memory_order_seq_cst,
                                                                   std::memory_order_relaxed);
                 assert(bottom == new_top);
-                _bottom.store(bottom, std::memory_order_relaxed);
+                this->_bottom.store(bottom, std::memory_order_relaxed);
                 return success;
             }
 
             // called by owner thread
             void push(T item) const {
-                ptrdiff_t bottom = this->_bottom.load(std::memory_order_relaxed);
+                std::ptrdiff_t bottom = this->_bottom.load(std::memory_order_relaxed);
                 const circular_array* array = this->_array.load(std::memory_order_relaxed);
-                ptrdiff_t capacity = array->capacity();
-                assert(bottom - _cached_top <= capacity);
-                if (bottom - _cached_top == capacity) {
-                    _cached_top = this->_top.load(std::memory_order_acquire);
-                    assert(bottom - _cached_top <= capacity);
-                    if (bottom - _cached_top == capacity) [[unlikely]] {
+                std::ptrdiff_t capacity = array->capacity();
+                assert(bottom - this->_cached_top <= capacity);
+                if (bottom - this->_cached_top == capacity) {
+                    this->_cached_top = this->_top.load(std::memory_order_acquire);
+                    assert(bottom - this->_cached_top <= capacity);
+                    if (bottom - this->_cached_top == capacity) [[unlikely]] {
                         circular_array* new_array = circular_array::make(capacity << 1);
-                        for (std::ptrdiff_t i = _cached_top; i != bottom; ++i) {
+                        for (std::ptrdiff_t i = this->_cached_top; i != bottom; ++i) {
                             T jtem = (*array)[i].load(std::memory_order_relaxed);
                             (*new_array)[i].store(jtem, std::memory_order_relaxed);
                         }
-                        // TODO: Garbage collection write barrier
-                        // Currently we are leaking the old array
-                        _array.store(new_array, std::memory_order_release);
+                        array->_object_shade();
+                        this->_array.store(new_array, std::memory_order_release);
                         array = new_array;
                     }
                 }
@@ -142,32 +146,51 @@ namespace aaa {
 #if defined(__has_feature)
 #    if __has_feature(thread_sanitizer)
                 // thread sanitizer requires that release (and acquire) fences
-                // are annotated with their associated variable(s)
+                // be annotated with their associated variable(s)
                 __tsan_release(&_top);
 #    endif
 #endif
-                _bottom.store(bottom + 1, std::memory_order_relaxed);
+                this->_bottom.store(bottom + 1, std::memory_order_relaxed);
             }
 
             // called by any thief thread
             bool steal(T& item) const {
-                std::ptrdiff_t top = _top.load(std::memory_order_acquire);
-                // TODO: Clang produces suboptimal code on x86 for seq_cst fence
+                std::ptrdiff_t top = this->_top.load(std::memory_order_acquire);
                 std::atomic_thread_fence(std::memory_order_seq_cst);
-                std::ptrdiff_t bottom = _bottom.load(std::memory_order_acquire);
+                std::ptrdiff_t bottom = this->_bottom.load(std::memory_order_acquire);
                 if (!(top < bottom))
                     return false;
                 // TODO: Current status of std::memory_order_consume
                 // This likely maps to std::memory_order_acquire
-                const circular_array* array = _array.load(std::memory_order_consume);
+                const circular_array* array = this->_array.load(std::memory_order_consume);
                 item = (*array)[top].load(std::memory_order_relaxed);
                 std::ptrdiff_t new_top = top + 1;
-                return _top.compare_exchange_strong(top,
-                                                    new_top,
-                                                    std::memory_order_seq_cst,
-                                                    std::memory_order_relaxed);
+                return this->_top.compare_exchange_strong(top,
+                                                          new_top,
+                                                          std::memory_order_seq_cst,
+                                                          std::memory_order_relaxed);
             }
             
+            
+            
+            
+            // called by termination-detecting owner
+            bool can_pop(T& item) {
+                std::ptrdiff_t bottom = this->_bottom.load(std::memory_order_relaxed);
+                std::atomic_thread_fence(std::memory_order_seq_cst);
+                this->_cached_top = _top.load(std::memory_order_relaxed);
+                assert(this->_cached_top <= bottom);
+                return this->_cached_top < bottom;
+                
+            }
+            
+            // called by termination-detecting thief
+            bool can_steal() const {
+                std::ptrdiff_t top = this->_top.load(std::memory_order_acquire);
+                std::atomic_thread_fence(std::memory_order_seq_cst);
+                std::ptrdiff_t bottom = this->_bottom.load(std::memory_order_acquire);
+                return !(top < bottom);
+            }
             
         }; // work_stealing_deque
         
@@ -178,4 +201,4 @@ namespace aaa {
     
 }
 
-#endif /* work_stealing_queue_hpp */
+#endif /* work_stealing_deque_hpp */

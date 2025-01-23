@@ -16,6 +16,7 @@
 #include <bit>
 #include <utility>
 
+#include "object.hpp"
 #include "latch.hpp"
 
 namespace aaa {
@@ -23,7 +24,7 @@ namespace aaa {
     template<typename T>
     struct PersistentIntMap {
         
-        struct Node {
+        struct Node  : gc::Object {
             uint64_t _prefix;
             int _shift;
             uint64_t _bitmap;
@@ -52,6 +53,23 @@ namespace aaa {
                 }
             }
             
+            
+            virtual void _object_scan() const override {
+                if (_shift) {
+                    int n = __builtin_popcountll(_bitmap);
+                    for (int i = 0; i != n; ++i) {
+                        _children[i]->_object_trace();
+                    }
+                }
+            }
+            
+            Node(uint64_t prefix, int shift, uint64_t bitmap)
+            : gc::Object()
+            , _prefix(prefix)
+            , _shift(shift)
+            , _bitmap(bitmap) {
+            }
+            
             static Node* make(uint64_t prefix, int shift, uint64_t bitmap) {
                 assert((shift >= 0) && (shift < 64) && !(shift % 6));
                 assert(!(prefix & ~(~(uint64_t)63 << shift )));
@@ -62,11 +80,7 @@ namespace aaa {
                                 : sizeof(T))
                                * __builtin_popcountll(bitmap)));
                 void* p = operator new(n);
-                return new(p) Node{
-                    prefix,
-                    shift,
-                    bitmap
-                };
+                return new(p) Node(prefix, shift, bitmap);
             }
             
             static const Node* make_from_array(uint64_t prefix, int shift, uint64_t bitmap, const Node* const* array) {
@@ -438,9 +452,13 @@ namespace aaa {
                 printf("}\n");
             }
             
+            virtual void _object_debug() const override final {
+                print();
+            }
+            
         };
         
-        static_assert(sizeof(Node) == 24);
+        static_assert(sizeof(Node) == 40);
         
         const Node* _root = nullptr;
         

@@ -36,11 +36,42 @@ namespace aaa {
     // variance.  Sampling an e^{-n} distribution would be relatively
     // expensive.
     
+    
+    //
+    // https://epaperpress.com/sortsearch/download/skiplist.pdf
+    
+    // Skip
+    // https://ticki.github.io/blog/skip-lists-done-right/
+    
     using std::pair;
     
     inline thread_local std::ranlux24_base* thread_local_random_number_generator = nullptr;
     
-    
+    /*
+    namespace _distribution {
+        
+        // experiments to generate the ideal (asterisk) geometric distribution
+        // with p = 1 - 1 / e
+        
+        uint_fast32_t generate_iterative() {
+            int count = 1;
+            while ((*thread_local_random_number_generator)() < (uint_fast32_t)6171993)
+                ++count;
+            return count;
+        };
+        
+        uint32_t generate_constant_time() {
+            std::uniform_real_distribution<double> a;
+            // this is actually going to call ranlux24 3 times to get the
+            // required 53 bits, and then do a quite naive job of using them;
+            // notably if the range includes a variety of exponents
+            double b = a(*thread_local_random_number_generator);
+            return (uint32_t)std::ceil(std::log(b) * -2.18019225602);
+        }
+        
+        
+    } // namespace _distribution
+    */
     
     
     

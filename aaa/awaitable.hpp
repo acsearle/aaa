@@ -17,21 +17,19 @@
 
 #include <mutex>
 
-#include "concurrent_queue.hpp"
-#include "work_stealing_queue.hpp"
+#include "concurrent_deque.hpp"
+#include "work_stealing_deque.hpp"
 
 namespace aaa {
     
-    // inline ConcurrentQueue2<std::coroutine_handle<>> work_queue;
-    // inline ConcurrentQueue2<std::coroutine_handle<>> work_queues[10];
-    inline work_stealing_deque<std::coroutine_handle<>> work_queues[10];
+    inline work_stealing_deque<std::coroutine_handle<>>* work_queues[10] = {};
     
     inline thread_local int tlq_index = 0;
     
     inline void schedule_coroutine_handle(std::coroutine_handle<> handle) {
         // work_queue.emplace(handle);
         // work_queues[tlq_index].emplace(handle);
-        work_queues[tlq_index].push(handle);
+        work_queues[tlq_index]->push(handle);
     }
         
     inline void schedule_coroutine_handle_from_address(void* address) {
